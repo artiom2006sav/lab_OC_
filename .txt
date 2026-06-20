@@ -1,176 +1,145 @@
 
 
-Тема 2
-2.1
-sudo mkdir -p /opt/techcorp/tools
-sudo touch /opt/techcorp/tools/check_db.sh
-sudo chmod 644 /opt/techcorp/tools/check_db.sh
-ls -la /opt/techcorp/tools/check_db.sh
-
-2.2 
-find /usr/bin -type f -perm /4000 -exec ls -l {} \; 2>/dev/null
-find / -type f -perm /4000 -exec ls -l {} \; 2>/dev/null > /tmp/suid_files.txt
-find / -type f -perm /2000 -exec ls -l {} \; 2>/dev/null > /tmp/sgid_files.txt
-wc -l /tmp/suid_files.txt /tmp/sgid_files.txt
-
-2.3 
-sudo mkdir /tmp/team_folder
-sudo useradd temp_user
-sudo -u temp_user touch /tmp/temp_file.txt
-sudo userdel temp_user
-sudo find / -nouser -o -nogroup 2>/dev/null
-sudo find / -nouser -exec chown root:root {} \; 2>/dev/null
-sudo find / -nogroup -exec chown root:root {} \; 2>/dev/null
-
-2.4
-sudo -u dev_lead bash -c "echo 'umask 027' >> ~dev_lead/.bashrc"
-sudo -u qa_lead bash -c "echo 'umask 037' >> ~qa_lead/.bashrc"
-sudo su - dev_lead -c "umask; touch ~/dev_file; mkdir ~/dev_dir; ls -la ~"
-sudo su - qa_lead -c "umask; touch ~/qa_file; mkdir ~/qa_dir; ls -la ~"
-
-
-2.5 
-sudo mkdir -p /opt/project/{src,docs,logs,config,backup}
-sudo chown root:developers /opt/project /opt/project/*
-sudo chmod 750 /opt/project
-sudo chmod 770 /opt/project/src
-sudo chmod 750 /opt/project/docs /opt/project/logs
-sudo chmod 700 /opt/project/config /opt/project/backup
-
-touch /tmp/test_file.sh /tmp/test_data.txt
-mkdir /tmp/test_dir
-chmod u+x /tmp/test_file.sh
-chmod go-w /tmp/test_data.txt
-chmod u=rwx,g=rx,o= /tmp/test_file.sh
-find /tmp/test_dir -type d -exec chmod 755 {} \;
-find /tmp/test_dir -type f -exec chmod 644 {} \;
-chmod u+s /tmp/test_file.sh
-sudo chmod g+s /opt/project/src
-
-sudo touch /opt/project/src/main.py /opt/project/src/utils.py /opt/project/docs/README.md
-sudo chown alice /opt/project/src/main.py
-sudo chown alice:developers /opt/project/src/utils.py
-sudo chgrp developers /opt/project/docs/README.md
-sudo chown -R root:developers /opt/project/
-sudo find /opt/project -user alice -exec chown carol {} \;
-
-umask
-umask 027
-touch /tmp/restricted_file
-mkdir /tmp/restricted_dir
-ls -la /tmp/restricted_file /tmp/restricted_dir
-umask 022
-
 
 
 Тема3
 3.1
-sleep 100 & sleep 200 & sleep 300 & sleep 400 & sleep 500 &
+dd if=/dev/urandom of=/dev/null & dd if=/dev/urandom of=/dev/null & dd if=/dev/urandom of=/dev/null &
+sleep 9999 & sleep 9999 &
+tail -f /var/log/syslog &
 jobs -l
-kill -SIGSTOP %2 %4      # приостановить 2-й и 4-й
-jobs
-fg %3                    # перевести 3-й на передний план, затем Ctrl+Z, затем bg %3
-bg %3
-jobs
-kill %1 %5               # завершить нечётные
-killall sleep            # завершить оставшиеся (или kill %2 %4)
-jobs
+ps aux | grep -E "dd|sleep|tail"
+for pid in $(pgrep -f "dd|sleep|tail"); do echo "=== PID $pid ==="; ls -l /proc/$pid/; cat /proc/$pid/status; cat /proc/$pid/cmdline; cat /proc/$pid/stat; cat /proc/$pid/maps; done
+pstree -p
 
 3.2 
-sleep 100 & sleep 200 & sleep 300 & sleep 400 & sleep 500 &
-sudo nice -n -5 dd if=/dev/urandom of=/dev/null &
+sudo nice -n -10 dd if=/dev/urandom of=/dev/null &
 nice -n 0 dd if=/dev/urandom of=/dev/null &
 nice -n 10 dd if=/dev/urandom of=/dev/null &
 ps -o pid,ni,comm | grep dd
-# В top: нажать r, ввести PID, новое nice (например 5)
-# Или через renice:
-sudo renice +5 -p <PID_второго>
+top
+# в top: нажать 'r', ввести PID второго процесса, ввести 5, Enter
+# для третьего: выйти из top, затем:
+sudo renice +5 -p <PID_третьего>
 ps -o pid,ni,comm | grep dd
 killall dd
 
 3.3
 
+sleep 100 & sleep 200 & sleep 300 & sleep 400 &
+jobs -l
+kill -SIGSTOP %1 %3
+jobs
+fg %2
+# нажать Ctrl+Z
+jobs
+bg %2
+jobs
+disown %4
+kill %1 %2 %3
+jobs
+
+3.4 
+cat > /tmp/zombie.sh << 'EOF'
+#!/bin/bash
+(sleep 30 && kill -0 $$ 2>/dev/null) &
+CHILD_PID=$!
+echo "Child PID: $CHILD_PID"
+sleep 1
+ps -o pid,stat,comm -p $CHILD_PID
+EOF
+chmod +x /tmp/zombie.sh
+/tmp/zombie.sh &
+sleep 2
+ps aux | grep defunct
+
+3.5
+cat > /tmp/signal_test.sh << 'EOF'
 #!/bin/bash
 counter=0
-trap 'echo "SIGTERM – завершение"; exit 0' SIGTERM
-trap 'echo "SIGUSR1 – сброс счётчика"; counter=0' SIGUSR1
-trap 'echo "Ctrl+C нажат, используйте SIGTERM"' SIGINT
+trap 'echo "SIGTERM – завершение..."; exit 0' SIGTERM
+trap 'echo "SIGUSR1 – время: $(date), счётчик: $counter"' SIGUSR1
+trap 'echo "SIGUSR2 – сброс счётчика"; counter=0' SIGUSR2
+trap 'echo "Ctrl+C игнорируется"' SIGINT
 echo "PID: $$"
 while true; do
     ((counter++))
-    echo "Счётчик: $counter"
     sleep 1
 done
-
-Запуск
-chmod +x ~/lab_scripts/signal_demo.sh
-./signal_demo.sh &
+EOF
+chmod +x /tmp/signal_test.sh
+/tmp/signal_test.sh &
 PID=$!
 kill -USR1 $PID
-kill -USR2 $PID   # игнорируется
+kill -USR1 $PID
+kill -USR2 $PID
+kill -USR1 $PID
 kill -TERM $PID
 
 Тема 4
-3.4 
-sudo tee /etc/systemd/system/signal_demo.service >/dev/null <<EOF
+4.1
+systemctl list-units --type=service --state=running
+systemctl list-units --type=service --state=failed
+systemctl cat sshd
+systemctl list-dependencies sshd
+
+4.2 
+sudo useradd -r -s /usr/sbin/nologin webapp
+sudo mkdir -p /opt/webapp/logs
+sudo chown webapp:webapp /opt/webapp /opt/webapp/logs
+
+sudo tee /opt/webapp/app.sh > /dev/null << 'EOF'
+#!/bin/bash
+LOG="/opt/webapp/logs/app.log"
+counter=0
+trap 'echo "$(date) Получен SIGTERM" >> $LOG; exit 0' SIGTERM
+trap 'echo "$(date) Перезагрузка конфигурации" >> $LOG' SIGHUP
+while true; do
+    ((counter++))
+    echo "$(date) Итерация $counter" >> $LOG
+    sleep 5
+done
+EOF
+sudo chmod +x /opt/webapp/app.sh
+sudo chown webapp:webapp /opt/webapp/app.sh
+
+sudo tee /etc/systemd/system/webapp.service > /dev/null << 'EOF'
 [Unit]
-Description=Signal Demo
+Description=WebApp Service
 After=network.target
 
 [Service]
 Type=simple
-User=$USER
-WorkingDirectory=$HOME/lab_scripts
-ExecStart=$HOME/lab_scripts/signal_demo.sh
+User=webapp
+WorkingDirectory=/opt/webapp
+ExecStart=/opt/webapp/app.sh
 Restart=on-failure
 RestartSec=5
-StandardOutput=journal
-StandardError=journal
+StartLimitInterval=60
+StartLimitBurst=3
+MemoryMax=512M
+CPUQuota=50%
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
 sudo systemctl daemon-reload
-sudo systemctl enable --now signal_demo.service
-sudo systemctl status signal_demo.service
-journalctl -u signal_demo.service -f   # Ctrl+C для выхода
+sudo systemctl enable --now webapp.service
+sudo systemctl status webapp.service
+journalctl -u webapp.service -f &
+sudo kill -HUP $(pgrep -f /opt/webapp/app.sh)
+sudo kill -TERM $(pgrep -f /opt/webapp/app.sh)
+sleep 6
+sudo systemctl status webapp.service
 
-3.5 
-sudo tee /etc/systemd/system/signal_demo.service >/dev/null <<EOF
-# Неудачные входы за 7 дней
-sudo journalctl --since "7 days ago" | grep -i "failed password" | wc -l
+4.3
 
-# Топ-5 IP
-sudo journalctl --since "7 days ago" | grep -i "failed password" | grep -oP 'from \K[0-9.]+' | sort | uniq -c | sort -rn | head -5
-
-# Упавшие службы за сегодня
-systemctl list-units --state=failed
-
-# Количество перезагрузок за месяц
-sudo journalctl --since "1 month ago" | grep -i "reboot" | wc -l
-
-3.6
-#!/bin/bash
-TAG="sysmon"
-CPU=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d% -f1)
-MEM=$(free | grep Mem | awk '{print $3/$2*100}')
-[[ $(echo "$CPU > 80" | bc) -eq 1 ]] && logger -t "$TAG" "WARNING: CPU $CPU%"
-[[ $(echo "$MEM > 90" | bc) -eq 1 ]] && logger -t "$TAG" "CRITICAL: MEM $MEM%"
-for s in ssh cron; do
-    systemctl is-active --quiet $s || logger -t "$TAG" "ALERT: $s not running"
-done
-
-cron 
-chmod +x ~/lab_scripts/system_monitor.sh
-(crontab -l 2>/dev/null; echo "*/5 * * * * $HOME/lab_scripts/system_monitor.sh") | crontab -
-
-sudo tee /etc/rsyslog.d/50-sysmon.conf >/dev/null <<EOF
-if \$programname == 'sysmon' then /var/log/sysmon.log
-& stop
-EOF
-sudo systemctl restart rsyslog
-
-# Тест
-~/lab_scripts/system_monitor.sh
-cat /var/log/sysmon.log
+sudo systemctl edit ssh
+# в открывшемся редакторе вставить:
+# [Service]
+# Environment="LOG_LEVEL=verbose"
+# RestartSec=10
+# сохранить и выйти
+sudo systemctl cat ssh
+sudo systemctl revert ssh
