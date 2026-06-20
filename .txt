@@ -1,0 +1,266 @@
+A1
+# Группы
+sudo groupadd -g 2001 dev_team
+sudo groupadd -g 2002 qa_team
+sudo groupadd -g 2003 devops_team
+sudo groupadd -g 2004 management
+
+# Пользователи
+sudo useradd -m -s /bin/bash -c "Lead Developer" -u 1501 -g dev_team -G management dev_lead
+sudo useradd -m -s /bin/bash -c "Junior Developer" -u 1502 -g dev_team dev_junior
+sudo useradd -m -s /bin/bash -c "QA Lead" -u 1503 -g qa_team -G management qa_lead
+sudo useradd -m -s /bin/bash -c "Junior QA" -u 1504 -g qa_team qa_junior
+sudo useradd -m -s /bin/bash -c "DevOps Engineer" -u 1505 -g devops_team -G management devops_eng
+
+# Пароли (все Login@2024!)
+for u in dev_lead dev_junior qa_lead qa_junior devops_eng; do
+    echo "$u:Login@2024!" | sudo chpasswd
+done
+
+# Проверка
+grep -E "dev_team|qa_team|devops_team|management" /etc/group
+for u in dev_lead dev_junior qa_lead qa_junior devops_eng; do id $u; done
+ls -ld /home/dev_lead /home/dev_junior /home/qa_lead /home/qa_junior /home/devops_eng
+
+# Системный пользователь deploy_bot
+sudo useradd -r -s /usr/sbin/nologin -c "CI/CD Bot" deploy_bot
+id deploy_bot
+
+A2
+# management (dev_lead, qa_lead, devops_eng) – 30/2/7/10
+for u in dev_lead qa_lead devops_eng; do
+    sudo chage -m 2 -M 30 -W 7 -I 10 $u
+done
+
+# junior (dev_junior, qa_junior) – 60/1/10/20
+for u in dev_junior qa_junior; do
+    sudo chage -m 1 -M 60 -W 10 -I 20 $u
+done
+
+# devops_eng отдельно (45/1/7/14) – если требуется, иначе закомментируйте
+sudo chage -m 1 -M 45 -W 7 -I 14 devops_eng
+
+# dev_junior – смена при первом входе
+sudo chage -d 0 dev_junior
+
+# qa_junior – истечение через 180 дней
+sudo chage -E $(date -d "+180 days" +%Y-%m-%d) qa_junior
+
+# Блокировка / разблокировка devops_eng
+sudo grep devops_eng /etc/shadow
+sudo usermod -L devops_eng
+sudo grep devops_eng /etc/shadow
+sudo usermod -U devops_eng
+sudo grep devops_eng /etc/shadow
+
+# Проверка всех политик
+for u in dev_lead dev_junior qa_lead qa_junior devops_eng; do
+    echo "=== $u ==="; sudo chage -l $u
+done
+
+
+
+
+B1
+#!/bin/bash
+LOG="/var/log/user_audit_$(date +%Y%m%d).log"
+exec > >(tee -a "$LOG") 2>&1
+
+echo "=== Отчёт $(date) | Хост $(hostname) | Пользователь $USER ==="
+
+# Статистика
+echo -e "\n--- Общая статистика ---"
+echo "Всего: $(wc -l < /etc/passwd)"
+echo "Системных (UID<1000): $(awk -F: '$3<1000' /etc/passwd | wc -l)"
+echo "Обычных (UID>=1000): $(awk -F: '$3>=1000' /etc/passwd | wc -l)"
+echo "Заблокированных: $(sudo awk -F: '$2~/^[!*]/' /etc/shadow | wc -l)"
+echo "Пустых паролей: $(sudo awk -F: '$2==""' /etc/shadow | wc -l)"
+
+# Угрозы
+echo -e "\n--- Потенциальные угрозы ---"
+echo "UID=0 (кроме root): $(awk -F: '$3==0 && $1!="root"' /etc/passwd | cut -d: -f1)"
+echo "Без пароля: $(sudo awk -F: '$2==""' /etc/shadow | cut -d: -f1)"
+echo "Bash/sh без home: $(awk -F: '($7=="/bin/bash"||$7=="/bin/sh") && !system("test -d "$6)' /etc/passwd | cut -d: -f1)"
+echo ".rhosts/.netrc: $(find /home -name ".rhosts" -o -name ".netrc" 2>/dev/null)"
+echo "Не входили >90 дней: $(sudo awk -F: '{if($3>0 && (systime()/86400 - $3)>90) print $1}' /etc/shadow)"
+
+# Политики
+echo -e "\n--- Политики паролей ---"
+echo "Истёкший пароль: $(sudo awk -F: '{if($5>0 && $3+$5 < systime()/86400) print $1}' /etc/shadow)"
+echo "Никогда не истекает: $(sudo awk -F: '{if($5==99999 || $5==-1) print $1}' /etc/shadow)"
+echo "Истекает <7 дней: $(sudo awk -F: '{if($5>0 && $3+$5 < systime()/86400+7) print $1}' /etc/shadow)"
+
+# Группы
+echo -e "\n--- Группы ---"
+echo "Пустые группы: $(awk -F: '$4==""' /etc/group | cut -d: -f1)"
+echo "Дубли GID: $(awk -F: '{print $3}' /etc/group | sort | uniq -d)"
+echo "В sudo/wheel: $(grep -E "^(sudo|wheel):" /etc/group | cut -d: -f4 | tr ',' '\n' | sort -u)"
+
+echo -e "\nОтчёт сохранён в $LOG"
+запуск
+chmod +x ~/lab_scripts/user_audit.sh
+sudo ~/lab_scripts/user_audit.sh
+
+Тема 2
+2.1
+sudo mkdir -p /srv/shared
+sudo chown root:dev_team /srv/shared
+sudo chmod 750 /srv/shared
+sudo chmod g+s /srv/shared
+# Проверка
+ls -ld /srv/shared
+# Создаём файл от alice (предварительно добавив её в dev_team)
+sudo useradd -m -s /bin/bash alice 2>/dev/null
+sudo usermod -aG dev_team alice
+sudo -u alice touch /srv/shared/testfile
+ls -l /srv/shared/testfile   # группа должна быть dev_team
+
+2.2 
+find /usr/bin -type f -perm /4000 -exec ls -l {} \; 2>/dev/null
+# Примеры с пояснениями (в комментариях):
+# /usr/bin/passwd – нужен для записи в /etc/shadow
+# /usr/bin/su      – смена пользователя
+# /usr/bin/mount   – монтирование ФС
+
+2.3 
+sudo mkdir /tmp/team_folder
+sudo chmod 1777 /tmp/team_folder
+sudo useradd -m bob 2>/dev/null
+sudo -u bob touch /tmp/team_folder/bob_file
+sudo -u alice rm /tmp/team_folder/bob_file   # должно выдать "Operation not permitted"
+# Объяснение: sticky bit разрешает удалять только владельцу файла
+
+2.4
+sudo -u hr_manager bash -c "echo 'umask 027' >> ~hr_manager/.bashrc"
+sudo su - hr_manager -c "umask"                # 0027
+sudo su - hr_manager -c "touch ~/testf; mkdir ~/testd; ls -la ~"
+
+
+2.5 
+#!/bin/bash
+PROJ="/opt/myproject"
+GRP="myproject_team"
+sudo mkdir -p $PROJ/{src,tests,docs,logs}
+sudo groupadd $GRP 2>/dev/null
+sudo chown root:$GRP $PROJ $PROJ/*
+sudo chmod 750 $PROJ
+sudo chmod 770 $PROJ/src $PROJ/tests
+sudo chmod 750 $PROJ/docs $PROJ/logs
+sudo chmod g+s $PROJ/src $PROJ/tests
+ls -laR $PROJ
+
+запуск
+chmod +x ~/lab_scripts/setup_project.sh
+sudo ~/lab_scripts/setup_project.sh
+
+Тема3
+3.1
+sleep 100 & sleep 200 & sleep 300 & sleep 400 & sleep 500 &
+jobs -l
+kill -SIGSTOP %2 %4      # приостановить 2-й и 4-й
+jobs
+fg %3                    # перевести 3-й на передний план, затем Ctrl+Z, затем bg %3
+bg %3
+jobs
+kill %1 %5               # завершить нечётные
+killall sleep            # завершить оставшиеся (или kill %2 %4)
+jobs
+
+3.2 
+sleep 100 & sleep 200 & sleep 300 & sleep 400 & sleep 500 &
+sudo nice -n -5 dd if=/dev/urandom of=/dev/null &
+nice -n 0 dd if=/dev/urandom of=/dev/null &
+nice -n 10 dd if=/dev/urandom of=/dev/null &
+ps -o pid,ni,comm | grep dd
+# В top: нажать r, ввести PID, новое nice (например 5)
+# Или через renice:
+sudo renice +5 -p <PID_второго>
+ps -o pid,ni,comm | grep dd
+killall dd
+
+3.3
+
+#!/bin/bash
+counter=0
+trap 'echo "SIGTERM – завершение"; exit 0' SIGTERM
+trap 'echo "SIGUSR1 – сброс счётчика"; counter=0' SIGUSR1
+trap 'echo "Ctrl+C нажат, используйте SIGTERM"' SIGINT
+echo "PID: $$"
+while true; do
+    ((counter++))
+    echo "Счётчик: $counter"
+    sleep 1
+done
+
+Запуск
+chmod +x ~/lab_scripts/signal_demo.sh
+./signal_demo.sh &
+PID=$!
+kill -USR1 $PID
+kill -USR2 $PID   # игнорируется
+kill -TERM $PID
+
+Тема 4
+3.4 
+sudo tee /etc/systemd/system/signal_demo.service >/dev/null <<EOF
+[Unit]
+Description=Signal Demo
+After=network.target
+
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=$HOME/lab_scripts
+ExecStart=$HOME/lab_scripts/signal_demo.sh
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now signal_demo.service
+sudo systemctl status signal_demo.service
+journalctl -u signal_demo.service -f   # Ctrl+C для выхода
+
+3.5 
+sudo tee /etc/systemd/system/signal_demo.service >/dev/null <<EOF
+# Неудачные входы за 7 дней
+sudo journalctl --since "7 days ago" | grep -i "failed password" | wc -l
+
+# Топ-5 IP
+sudo journalctl --since "7 days ago" | grep -i "failed password" | grep -oP 'from \K[0-9.]+' | sort | uniq -c | sort -rn | head -5
+
+# Упавшие службы за сегодня
+systemctl list-units --state=failed
+
+# Количество перезагрузок за месяц
+sudo journalctl --since "1 month ago" | grep -i "reboot" | wc -l
+
+3.6
+#!/bin/bash
+TAG="sysmon"
+CPU=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d% -f1)
+MEM=$(free | grep Mem | awk '{print $3/$2*100}')
+[[ $(echo "$CPU > 80" | bc) -eq 1 ]] && logger -t "$TAG" "WARNING: CPU $CPU%"
+[[ $(echo "$MEM > 90" | bc) -eq 1 ]] && logger -t "$TAG" "CRITICAL: MEM $MEM%"
+for s in ssh cron; do
+    systemctl is-active --quiet $s || logger -t "$TAG" "ALERT: $s not running"
+done
+
+cron 
+chmod +x ~/lab_scripts/system_monitor.sh
+(crontab -l 2>/dev/null; echo "*/5 * * * * $HOME/lab_scripts/system_monitor.sh") | crontab -
+
+sudo tee /etc/rsyslog.d/50-sysmon.conf >/dev/null <<EOF
+if \$programname == 'sysmon' then /var/log/sysmon.log
+& stop
+EOF
+sudo systemctl restart rsyslog
+
+# Тест
+~/lab_scripts/system_monitor.sh
+cat /var/log/sysmon.log
